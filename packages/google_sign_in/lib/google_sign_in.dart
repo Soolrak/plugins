@@ -36,11 +36,12 @@ class GoogleSignInAccount implements GoogleIdentity {
         email = data['email'],
         id = data['id'],
         photoUrl = data['photoUrl'],
-        _idToken = data['idToken'] {
+        _idToken = data['idToken'],
+        authCode = data['authCode'] {
     assert(id != null);
   }
 
-  // These error codes must match with ones declared on Android and iOS sides.
+// These error codes must match with ones declared on Android and iOS sides.
 
   /// Error code indicating there was a failed attempt to recover user authentication.
   static const String kFailedToRecoverAuthError = 'failed_to_recover_auth';
@@ -59,6 +60,9 @@ class GoogleSignInAccount implements GoogleIdentity {
 
   @override
   final String photoUrl;
+
+//TODO Always returns empty on IOS
+  final String authCode;
 
   final String _idToken;
   final GoogleSignIn _googleSignIn;
@@ -79,15 +83,15 @@ class GoogleSignInAccount implements GoogleIdentity {
     }
 
     final Map<String, dynamic> response =
-        await GoogleSignIn.channel.invokeMapMethod<String, dynamic>(
+    await GoogleSignIn.channel.invokeMapMethod<String, dynamic>(
       'getTokens',
       <String, dynamic>{
         'email': email,
         'shouldRecoverAuth': true,
       },
     );
-    // On Android, there isn't an API for refreshing the idToken, so re-use
-    // the one we obtained on login.
+// On Android, there isn't an API for refreshing the idToken, so re-use
+// the one we obtained on login.
     if (response['idToken'] == null) {
       response['idToken'] = _idToken;
     }
@@ -157,14 +161,18 @@ class GoogleSignIn {
   /// The [hostedDomain] argument specifies a hosted domain restriction. By
   /// setting this, sign in will be restricted to accounts of the user in the
   /// specified domain. By default, the list of accounts will not be restricted.
-  GoogleSignIn({this.signInOption, this.scopes, this.hostedDomain});
+  GoogleSignIn(
+      {this.signInOption, this.scopes, this.hostedDomain, this.requestAuthCode = true});
 
   /// Factory for creating default sign in user experience.
-  factory GoogleSignIn.standard({List<String> scopes, String hostedDomain}) {
+  factory GoogleSignIn.standard(
+      {List<String> scopes, String hostedDomain, bool requestAuthCode}) {
     return GoogleSignIn(
-        signInOption: SignInOption.standard,
-        scopes: scopes,
-        hostedDomain: hostedDomain);
+      signInOption: SignInOption.standard,
+      scopes: scopes,
+      hostedDomain: hostedDomain,
+      requestAuthCode: requestAuthCode,
+    );
   }
 
   /// Factory for creating sign in suitable for games. This option must not be
@@ -173,7 +181,7 @@ class GoogleSignIn {
     return GoogleSignIn(signInOption: SignInOption.games);
   }
 
-  // These error codes must match with ones declared on Android and iOS sides.
+// These error codes must match with ones declared on Android and iOS sides.
 
   /// Error code indicating there is no signed in user and interactive sign in
   /// flow is required.
@@ -189,7 +197,7 @@ class GoogleSignIn {
   /// The [MethodChannel] over which this class communicates.
   @visibleForTesting
   static const MethodChannel channel =
-      MethodChannel('plugins.flutter.io/google_sign_in');
+  MethodChannel('plugins.flutter.io/google_sign_in');
 
   /// Option to determine the sign in user experience. [SignInOption.games] must
   /// not be used on iOS.
@@ -201,21 +209,24 @@ class GoogleSignIn {
   /// Domain to restrict sign-in to.
   final String hostedDomain;
 
+  /// Set if server-side login is required
+  final bool requestAuthCode;
+
   StreamController<GoogleSignInAccount> _currentUserController =
-      StreamController<GoogleSignInAccount>.broadcast();
+  StreamController<GoogleSignInAccount>.broadcast();
 
   /// Subscribe to this stream to be notified when the current user changes.
   Stream<GoogleSignInAccount> get onCurrentUserChanged =>
       _currentUserController.stream;
 
-  // Future that completes when we've finished calling `init` on the native side
+// Future that completes when we've finished calling `init` on the native side
   Future<void> _initialization;
 
   Future<GoogleSignInAccount> _callMethod(String method) async {
     await _ensureInitialized();
 
     final Map<String, dynamic> response =
-        await channel.invokeMapMethod<String, dynamic>(method);
+    await channel.invokeMapMethod<String, dynamic>(method);
     return _setCurrentUser(response != null && response.isNotEmpty
         ? GoogleSignInAccount._(this, response)
         : null);
@@ -235,9 +246,10 @@ class GoogleSignIn {
         'signInOption': (signInOption ?? SignInOption.standard).toString(),
         'scopes': scopes ?? <String>[],
         'hostedDomain': hostedDomain,
+        'requestAuthCode': requestAuthCode,
       })
         ..catchError((dynamic _) {
-          // Invalidate initialization if it errored out.
+// Invalidate initialization if it errored out.
           _initialization = null;
         });
     }
@@ -260,9 +272,9 @@ class GoogleSignIn {
 
     final _MethodCompleter completer = _MethodCompleter(method);
     _lastMethodCompleter.future.whenComplete(() {
-      // If after the last completed call currentUser is not null and requested
-      // method is a sign in method, re-use the same authenticated user
-      // instead of making extra call to the native side.
+// If after the last completed call currentUser is not null and requested
+// method is a sign in method, re-use the same authenticated user
+// instead of making extra call to the native side.
       const List<String> kSignInMethods = <String>['signIn', 'signInSilently'];
       if (kSignInMethods.contains(method) && _currentUser != null) {
         completer.complete(_currentUser);
@@ -270,7 +282,7 @@ class GoogleSignIn {
         completer.complete(_callMethod(method));
       }
     }).catchError((dynamic _) {
-      // Ignore if previous call completed with an error.
+// Ignore if previous call completed with an error.
     });
     _lastMethodCompleter = completer;
     return _lastMethodCompleter.future;
